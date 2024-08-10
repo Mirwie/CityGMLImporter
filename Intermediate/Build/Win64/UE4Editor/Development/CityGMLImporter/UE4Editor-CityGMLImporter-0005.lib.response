@@ -1,0 +1,12 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/DEF
+/NAME:"UE4Editor-CityGMLImporter-0005.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"C:\Users\mirco\Documents\Unreal Projects\BAProjekt\Intermediate\Build\Win64\BAProjektEditor\Development\Engine\SharedPCH.Engine.ShadowErrors.h.obj"
+"C:\Users\mirco\Documents\Unreal Projects\BAProjekt\Plugins\CityGMLImporter\Intermediate\Build\Win64\UE4Editor\Development\CityGMLImporter\CityGMLImporter.cpp.obj"
+"C:\Users\mirco\Documents\Unreal Projects\BAProjekt\Plugins\CityGMLImporter\Intermediate\Build\Win64\UE4Editor\Development\CityGMLImporter\Default.rc2.res"
+/OUT:"C:\Users\mirco\Documents\Unreal Projects\BAProjekt\Plugins\CityGMLImporter\Intermediate\Build\Win64\UE4Editor\Development\CityGMLImporter\UE4Editor-CityGMLImporter-0005.lib"
