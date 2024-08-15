@@ -16,6 +16,9 @@ public:
 private:
 	void PluginButtonClicked();
 	void AddMenuExtension(FMenuBuilder& Builder);
+	void ProcessCityGML(const FString& FString);
+	void CreateMeshFromPolygon(TArray<FVector>& Vertices, TArray<int32>& Triangles);
+
 
 	TSharedPtr<FUICommandList> PluginCommands;
 
