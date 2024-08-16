@@ -17,7 +17,9 @@ private:
 	void PluginButtonClicked();
 	void AddMenuExtension(FMenuBuilder& Builder);
 	void ProcessCityGML(const FString& FString);
-	void CreateMeshFromPolygon(TArray<FVector>& Vertices, TArray<int32>& Triangles);
+	FVector ConvertUtmToUnreal(float UTM_X, float UTM_Y, FVector OriginOffset);
+	void CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds);
+
 
 
 	TSharedPtr<FUICommandList> PluginCommands;
