@@ -107,7 +107,6 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
     FVector OffsetVector = FVector(0.0f, 0.0f, 0.0f);
     const FXmlNode* BoundaryNode = CityObjectMembers[1]->FindChildNode(TEXT("gml:Envelope"));
 
-    UE_LOG(LogTemp, Log, TEXT("BoundaryNode sollte eigentlich ab diesem Punkt sichtbar sein"));
     if (BoundaryNode) {
         // Aus dem Boundary Vektor die x und y Koordinaten extrahieren für einen Offset
         FString lowerCorner = BoundaryNode->GetChildrenNodes()[0]->GetContent();
@@ -160,22 +159,21 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
                                                 if (PosListNode) {
                                                     FString PosList = PosListNode->GetContent();
                                                     TArray<FString> PosArray;
-                                                    PosList.ParseIntoArray(PosArray, TEXT(" "), true); // false damit " " auch drin ist
+                                                    PosList.ParseIntoArray(PosArray, TEXT(" "), true);
                                                     UE_LOG(LogTemp, Log, TEXT("Hier PosArray anschauen"))
 
-                                                        for (int32 i = 0; i < PosArray.Num() - 3; i += 3) { // Alle Punkte außer den letzten weil Kreis
-                                                            Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), OffsetVector));
-                                                        }
+                                                     for (int32 i = 0; i < PosArray.Num() - 3; i += 3) { // Alle Punkte außer den letzten weil Kreis
+                                                        Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), FCString::Atof(*PosArray[i + 2]), OffsetVector));
+                                                        } 
 
-                                                    // Hier werden die Dreiecke für den Mesh-Aufbau definiert (Platzhalter)
-                                                    int32 VertexOffset = Vertices.Num() - 4;
-                                                    Triangles.Add(VertexOffset);
-                                                    Triangles.Add(VertexOffset + 1);
-                                                    Triangles.Add(VertexOffset + 2);
-
-                                                    Triangles.Add(VertexOffset);
-                                                    Triangles.Add(VertexOffset + 2);
-                                                    Triangles.Add(VertexOffset + 3);
+                                                     if (Vertices.Num() >= 3) { // Polygon mit mindestens 3 Punkten, welche nicht konvex und nicht komplex sind (also Lod1)
+                                                        for (int32 k = 1; k < Vertices.Num() - 1; ++k) {
+                                                             // Füge Dreiecke hinzu
+                                                             Triangles.Add(0);
+                                                             Triangles.Add(k);
+                                                             Triangles.Add(k + 1);
+                                                         }
+                                                      }   
                                                 }
                                             }
                                         }
@@ -188,33 +186,30 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
                         }
                     }
                 }
-                BuildingIds.Add(BuildingID);
-                allBuildingsFromFile.Add(BuildingVectors); // Hier weil es safe ein Gebäude sein muss
+                BuildingIds.Add(BuildingID); // Hier könnte man Daten wie Adresse und Ort mitnehmen
+                allBuildingsFromFile.Add(BuildingVectors);
                 allBuildingsFromFileTriangles.Add(BuildingTriangles);
             } 
     } // Gebäude zuende
 
-    UE_LOG(LogTemp, Log, TEXT("Finished processing CityGML to C++ Format"));
-    testGebauedeGenerationUE();
-    //CreateMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
+    CreateMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
 
 
     UE_LOG(LogTemp, Log, TEXT("Finished processing CityGML file: %s"), *FilePath);
 
 }
 
-FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, FVector OriginOffset) 
+FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, float UTM_Z,  FVector OriginOffset)
 {
     // Vertausche die Achsen: X -> Y und Y -> X ( X Osten/ Y Norden)
     float UnrealX = UTM_Y - OriginOffset.Y;
     float UnrealY = UTM_X - OriginOffset.X;
 
-    return FVector(UnrealX, UnrealY, 180.0f);
+    return FVector(UnrealX, UnrealY, UTM_Z);
 }
 
 void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) {
 
-    // Erstelle ein neues statisches Mesh in der Welt
     UWorld* World = GEditor->GetEditorWorldContext().World();
 
     if (World) {

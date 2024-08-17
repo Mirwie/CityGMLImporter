@@ -17,7 +17,7 @@ private:
 	void PluginButtonClicked();
 	void AddMenuExtension(FMenuBuilder& Builder);
 	void ProcessCityGML(const FString& FString);
-	FVector ConvertUtmToUnreal(float UTM_X, float UTM_Y, FVector OriginOffset);
+	FVector ConvertUtmToUnreal(float UTM_X, float UTM_Y, float UTM_Z,  FVector OriginOffset);
 	void CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds);
 	void testGebauedeGenerationUE();
 
