@@ -50,7 +50,7 @@ void FCityGMLImporterModule::AddMenuExtension(FMenuBuilder& Builder)
 
 void FCityGMLImporterModule::PluginButtonClicked()
 {
-   
+
     TArray<FString> OutFiles;
     IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
     bool bOpened = false;
@@ -118,94 +118,139 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
         OffsetVector.Z = 0.0f;
     }
 
-        // Iteriere über alle Knoten
-    TArray<TArray<TArray<FVector>>> allBuildingsFromFile; // Alle Gebäude
-    TArray<TArray<TArray<int32>>> allBuildingsFromFileTriangles;
-    TArray<FString> BuildingIds;
-    for (FXmlNode* CityObjectMember : CityObjectMembers)
-    {
-
-            // Suche nach Building-Knoten
-            const FXmlNode* BuildingNode = CityObjectMember->FindChildNode(TEXT("bldg:Building"));
-            if (BuildingNode) { 
-
-                TArray<TArray<FVector>> BuildingVectors; // Ein Gebäude
-                TArray<TArray<int32>> BuildingTriangles;
-                FString BuildingID = BuildingNode->GetAttribute(TEXT("gml:id"));
-
-                const FXmlNode* Lod1SolidNode = BuildingNode->FindChildNode(TEXT("bldg:lod1Solid"));
-                if (Lod1SolidNode) {
-
-                    const FXmlNode* SolidNode = Lod1SolidNode->FindChildNode(TEXT("gml:Solid"));
-                    if (SolidNode) {
-
-                        const FXmlNode* ExteriorNode = SolidNode->FindChildNode(TEXT("gml:exterior"));
-                        if (ExteriorNode) {
-
-                            const FXmlNode* CompositeSurfaceNode = ExteriorNode->FindChildNode(TEXT("gml:CompositeSurface"));
-                            if (CompositeSurfaceNode) {
-
-                                // Verarbeite alle gml:surfaceMember-Knoten also die einzelnen Waende oder Decken
-                                for (const FXmlNode* SurfaceMemberNode : CompositeSurfaceNode->GetChildrenNodes()) {
-                                    TArray<FVector> Vertices; // Für eine Fläche
-                                    TArray<int32> Triangles;
-                                    const FXmlNode* PolygonNode = SurfaceMemberNode->FindChildNode(TEXT("gml:Polygon"));
-                                    if (PolygonNode) {
-                                        const FXmlNode* PolygonExteriorNode = PolygonNode->FindChildNode(TEXT("gml:exterior"));
-                                        if (PolygonExteriorNode) {
-                                            const FXmlNode* LinearRingNode = PolygonExteriorNode->FindChildNode(TEXT("gml:LinearRing"));
-                                            if (LinearRingNode) {
-                                                const FXmlNode* PosListNode = LinearRingNode->FindChildNode(TEXT("gml:posList"));
-                                                if (PosListNode) {
-                                                    FString PosList = PosListNode->GetContent();
-                                                    TArray<FString> PosArray;
-                                                    PosList.ParseIntoArray(PosArray, TEXT(" "), true);
-                                                    UE_LOG(LogTemp, Log, TEXT("Hier PosArray anschauen"))
-
-                                                     for (int32 i = 0; i < PosArray.Num() - 3; i += 3) { // Alle Punkte außer den letzten weil Kreis
-                                                        Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), FCString::Atof(*PosArray[i + 2]), OffsetVector));
-                                                        } 
-
-                                                     if (Vertices.Num() >= 3) { // Polygon mit mindestens 3 Punkten, welche nicht konvex und nicht komplex sind (also Lod1)
-                                                        for (int32 k = 1; k < Vertices.Num() - 1; ++k) {
-                                                             // Füge Dreiecke hinzu
-                                                             Triangles.Add(0);
-                                                             Triangles.Add(k);
-                                                             Triangles.Add(k + 1);
-                                                         }
-                                                      }   
-                                                }
-                                            }
-                                        }
-                                    }
-                                    BuildingVectors.Add(Vertices);
-                                    BuildingTriangles.Add(Triangles);
-                                } // Wand bzw. Decke Ende
-
-                            }
-                        }
-                    }
-                }
-                BuildingIds.Add(BuildingID); // Hier könnte man Daten wie Adresse und Ort mitnehmen
-                allBuildingsFromFile.Add(BuildingVectors);
-                allBuildingsFromFileTriangles.Add(BuildingTriangles);
-            } 
-    } // Gebäude zuende
-
-    CreateMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
-
+    const FXmlNode* NameNode = CityObjectMembers[0];
+    if (NameNode) {
+        FString LoD = NameNode->GetContent().Left(4);
+        if (LoD == "LoD1") {
+            ProcessLoD1(CityObjectMembers, OffsetVector);
+        }
+        else if (LoD == "LoD2") {
+            ProcessLoD2(CityObjectMembers, OffsetVector);
+        }
+        else {
+            UE_LOG(LogTemp, Log, TEXT("LoD nicht unterstuetzt"));
+        }
+    }
 
     UE_LOG(LogTemp, Log, TEXT("Finished processing CityGML file: %s"), *FilePath);
 
 }
 
-FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, float UTM_Z,  FVector OriginOffset)
+void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMembers, FVector OffsetVector)
+{
+    // Verarbeite die CityObjectMembers für LoD1
+    UE_LOG(LogTemp, Log, TEXT("Processing LoD1"));
+
+    // Iteriere über alle Knoten
+    TArray<TArray<TArray<FVector>>> allBuildingsFromFile; // Alle Gebäude
+    TArray<TArray<TArray<int32>>> allBuildingsFromFileTriangles;
+    TArray<FString> BuildingIds;
+    for (FXmlNode* CityObjectMember : CityObjectMembers)
+    {
+        // Suche nach Building-Knoten
+        const FXmlNode* BuildingNode = CityObjectMember->FindChildNode(TEXT("bldg:Building"));
+        if (BuildingNode) {
+
+            TArray<TArray<FVector>> BuildingVectors; // Ein Gebäude
+            TArray<TArray<int32>> BuildingTriangles;
+            FString BuildingID = BuildingNode->GetAttribute(TEXT("gml:id"));
+
+            const FXmlNode* Lod1SolidNode = BuildingNode->FindChildNode(TEXT("bldg:lod1Solid"));
+            if (Lod1SolidNode) {
+
+                const FXmlNode* SolidNode = Lod1SolidNode->FindChildNode(TEXT("gml:Solid"));
+                if (SolidNode) {
+
+                    const FXmlNode* ExteriorNode = SolidNode->FindChildNode(TEXT("gml:exterior"));
+                    if (ExteriorNode) {
+
+                        const FXmlNode* CompositeSurfaceNode = ExteriorNode->FindChildNode(TEXT("gml:CompositeSurface"));
+                        if (CompositeSurfaceNode) {
+
+                            // Verarbeite alle gml:surfaceMember-Knoten also die einzelnen Waende oder Decken
+                            for (const FXmlNode* SurfaceMemberNode : CompositeSurfaceNode->GetChildrenNodes()) {
+                                TArray<FVector> Vertices; // Für eine Fläche
+                                TArray<int32> Triangles;
+                                const FXmlNode* PolygonNode = SurfaceMemberNode->FindChildNode(TEXT("gml:Polygon"));
+                                if (PolygonNode) {
+                                    const FXmlNode* PolygonExteriorNode = PolygonNode->FindChildNode(TEXT("gml:exterior"));
+                                    if (PolygonExteriorNode) {
+                                        const FXmlNode* LinearRingNode = PolygonExteriorNode->FindChildNode(TEXT("gml:LinearRing"));
+                                        if (LinearRingNode) {
+                                            const FXmlNode* PosListNode = LinearRingNode->FindChildNode(TEXT("gml:posList"));
+                                            if (PosListNode) {
+                                                FString PosList = PosListNode->GetContent();
+                                                TArray<FString> PosArray;
+                                                PosList.ParseIntoArray(PosArray, TEXT(" "), true);
+                                                UE_LOG(LogTemp, Log, TEXT("Hier PosArray anschauen"))
+
+                                                for (int32 i = 0; i < PosArray.Num() - 3; i += 3) { // Alle Punkte außer den letzten weil Kreis
+                                                    Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), FCString::Atof(*PosArray[i + 2]), OffsetVector));
+                                                }
+
+                                                if (Vertices.Num() >= 3) { // Polygon mit mindestens 3 Punkten, welche nicht konvex und nicht komplex sind (also Lod1)
+                                                    for (int32 k = 1; k < Vertices.Num() - 1; ++k) {
+                                                        // Füge Dreiecke hinzu
+                                                        Triangles.Add(0);
+                                                        Triangles.Add(k);
+                                                        Triangles.Add(k + 1);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                BuildingVectors.Add(Vertices);
+                                BuildingTriangles.Add(Triangles);
+                            } // Wand bzw. Decke Ende
+
+                        }
+                    }
+                }
+            }
+            BuildingIds.Add(BuildingID); // Hier könnte man Daten wie Adresse und Ort mitnehmen
+            allBuildingsFromFile.Add(BuildingVectors);
+            allBuildingsFromFileTriangles.Add(BuildingTriangles);
+        }
+    } // Gebäude zuende
+
+    CreateMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
+}
+
+void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMembers, FVector Offsetvector)
+{
+    // Verarbeite die CityObjectMembers für LoD2
+    UE_LOG(LogTemp, Log, TEXT("Processing LoD2"));
+
+    TArray<TArray<TArray<FVector>>> allBuildingsFromFile; // Alle Gebäude
+    TArray<TArray<TArray<int32>>> allBuildingsFromFileTriangles;
+    TArray<FString> BuildingIds;
+    for (FXmlNode* CityObjectMember : CityObjectMembers) {
+
+        // Suche nach Building-Knoten
+        const FXmlNode* BuildingNode = CityObjectMember->FindChildNode(TEXT("bldg:Building"));
+        if (BuildingNode) {
+
+            TArray<TArray<FVector>> BuildingVectors; // Ein Gebäude
+            TArray<TArray<int32>> BuildingTriangles;
+            FString BuildingID = BuildingNode->GetAttribute(TEXT("gml:id"));
+
+            const FXmlNode* BoundedByNode = BuildingNode->FindChildNode(TEXT("bldg:boundedBy"));
+            if (BoundedByNode) {
+                const FXmlNode* SurfaceNode = BoundedByNode->GetFirstChildNode();
+
+            }
+        }
+    }
+}
+
+FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, float UTM_Z, FVector OriginOffset)
 {
     // Vertausche die Achsen: X -> Y und Y -> X ( X Osten/ Y Norden)
     float UnrealX = UTM_Y - OriginOffset.Y;
     float UnrealY = UTM_X - OriginOffset.X;
 
-    return FVector(UnrealX, UnrealY, UTM_Z);
+    return FVector(UnrealX, UnrealY, UTM_Z + 200.0f);
 }
 
 void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) {
@@ -326,7 +371,7 @@ void FCityGMLImporterModule::testGebauedeGenerationUE() { // Generierte Testdate
     Triangles.Add(Building1Triangles);
     BuildingIds.Add(TEXT("Building_1"));
 
-// Gebäude 2 (ähnliches Gebäude, etwas größer)
+    // Gebäude 2 (ähnliches Gebäude, etwas größer)
     TArray<TArray<FVector>> Building2Vertices;
     TArray<TArray<int32>> Building2Triangles;
 
@@ -408,7 +453,7 @@ void FCityGMLImporterModule::testGebauedeGenerationUE() { // Generierte Testdate
     Triangles.Add(Building2Triangles);
     BuildingIds.Add(TEXT("Building_2"));
 
-// Gebäude 3 (noch größer und komplexer mit 6 Wänden)
+    // Gebäude 3 (noch größer und komplexer mit 6 Wänden)
     TArray<TArray<FVector>> Building3Vertices;
     TArray<TArray<int32>> Building3Triangles;
 
