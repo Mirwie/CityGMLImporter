@@ -15,11 +15,12 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 
-
-
 static const FName CityGMLImporterTabName("CityGMLImporter");
 
 #define LOCTEXT_NAMESPACE "FCityGMLImporterModule"
+
+TArray<TArray<TArray<FVector>>> AllBuildings;
+TArray<TArray<TArray<int32>>> AllTriangles;
 
 void FCityGMLImporterModule::StartupModule()
 {
@@ -70,9 +71,12 @@ void FCityGMLImporterModule::PluginButtonClicked()
 
     if (bOpened && OutFiles.Num() > 0)
     {
+        AllBuildings.Empty();
+        AllTriangles.Empty();
         for (const FString& SelectedFile : OutFiles) {
             ProcessCityGML(SelectedFile);
         }
+        CreateOneMeshFromPolygon(AllBuildings, AllTriangles);
         FText DialogText = FText::Format(
             LOCTEXT("FilesLoaded", "{0} Dateien erfolgreich eingelesen."),
             FText::AsNumber(OutFiles.Num())
@@ -217,8 +221,8 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
             allBuildingsFromFileTriangles.Add(BuildingTriangles);
         }
     } // Gebäude zuende
-
-    CreateOneMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
+    AllBuildings.Append(allBuildingsFromFile);
+    AllTriangles.Append(allBuildingsFromFileTriangles);
 }
 
 void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMembers, FVector OffsetVector)
@@ -300,7 +304,8 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
             BuildingIds.Add(BuildingID);
         }
     } // Gebäude Ende Schleife
-    CreateOneMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
+    AllBuildings.Append(allBuildingsFromFile);
+    AllTriangles.Append(allBuildingsFromFileTriangles);
 }
 
 FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, float UTM_Z, FVector OriginOffset)
@@ -345,7 +350,7 @@ void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>
     }
 }
 
-void FCityGMLImporterModule::CreateOneMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) { 
+void FCityGMLImporterModule::CreateOneMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles) { 
     UWorld* World = GEditor->GetEditorWorldContext().World();
 
     if (World) {
@@ -357,8 +362,8 @@ void FCityGMLImporterModule::CreateOneMeshFromPolygon(TArray<TArray<TArray<FVect
             MeshActor->SetRootComponent(ProceduralMesh);
             ProceduralMesh->RegisterComponent();
 
-            TArray<FVector> AllVertices;
-            TArray<int32> AllTriangles;
+            TArray<FVector> AllVerticesMesh;
+            TArray<int32> AllTrianglesMesh;
 
             // Offsets für Triangles, pro Gebäude
             int32 VertexOffset = 0;
@@ -372,20 +377,20 @@ void FCityGMLImporterModule::CreateOneMeshFromPolygon(TArray<TArray<TArray<FVect
                     const TArray<FVector>& Vertices = Building[j];
                     const TArray<int32>& TrianglesArray = BuildingTriangles[j];
 
-                    AllVertices.Append(Vertices);
+                    AllVerticesMesh.Append(Vertices);
 
                     for (int32 TriIndex : TrianglesArray) {
-                        AllTriangles.Add(TriIndex + VertexOffset);
+                        AllTrianglesMesh.Add(TriIndex + VertexOffset);
                     }
 
                     VertexOffset += Vertices.Num();
                 }
             }
 
-            ProceduralMesh->CreateMeshSection(0, AllVertices, AllTriangles, TArray<FVector>(), TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), true);
+            ProceduralMesh->CreateMeshSection(0, AllVerticesMesh, AllTrianglesMesh, TArray<FVector>(), TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), true);
 
             // ID wird noch der Dateiname
-            MeshActor->SetActorLabel(TEXT("BuildingsPerFile"));
+            MeshActor->SetActorLabel(TEXT("CityGMLMesh"));
         }
     }
 }
