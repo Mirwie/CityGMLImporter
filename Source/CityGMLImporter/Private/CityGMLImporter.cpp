@@ -59,24 +59,24 @@ void FCityGMLImporterModule::PluginButtonClicked()
     {
         bOpened = DesktopPlatform->OpenFileDialog(  // Öffne den Datei-Dialog
             nullptr,
-            TEXT("Select a CityGML file to import"),
+            TEXT("Select CityGML files to import"),
             FPaths::ProjectDir(),
             TEXT(""),
             TEXT("CityGML Files (*.xml)|*.xml"),
-            EFileDialogFlags::None,
+            EFileDialogFlags::Multiple,
             OutFiles
         );
     }
 
     if (bOpened && OutFiles.Num() > 0)
     {
-        FString SelectedFile = OutFiles[0];
-        ProcessCityGML(SelectedFile);
-
+        for (const FString& SelectedFile : OutFiles) {
+            ProcessCityGML(SelectedFile);
+        }
         FText DialogText = FText::Format(
-            LOCTEXT("FileSelected", "Datei erfolgreich eingelesen: {0}"),
-            FText::FromString(SelectedFile)
-        );
+            LOCTEXT("FilesLoaded", "{0} Dateien erfolgreich eingelesen."),
+            FText::AsNumber(OutFiles.Num())
+            );
         FMessageDialog::Open(EAppMsgType::Ok, DialogText);
     }
     else
@@ -115,6 +115,10 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
 
         OffsetVector.X = FCString::Atof(*OffsetArray[0]);
         OffsetVector.Y = FCString::Atof(*OffsetArray[1]);
+
+        OffsetVector.X = 548000.0f;
+        OffsetVector.Y = 5935000.0f;
+
         OffsetVector.Z = 0.0f;
     }
 
