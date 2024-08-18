@@ -214,7 +214,7 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
         }
     } // Gebäude zuende
 
-    CreateMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
+    CreateOneMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
 }
 
 void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMembers, FVector OffsetVector)
@@ -296,7 +296,7 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
             BuildingIds.Add(BuildingID);
         }
     } // Gebäude Ende Schleife
-    CreateMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
+    CreateOneMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
 }
 
 FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, float UTM_Z, FVector OriginOffset)
@@ -309,7 +309,8 @@ FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, flo
 }
 
 void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) {
-
+    // Wenn nicht jedes Gebäude ein Actor sein soll diese Methode raus
+    // Und Vertices und Triangles direkt in ein Array
     UWorld* World = GEditor->GetEditorWorldContext().World();
 
     if (World) {
@@ -336,6 +337,51 @@ void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>
                 // Setze einen Label oder eine ID für das Actor-Objekt (optional) und Adresse geht in Lod1 auch
                 MeshActor->SetActorLabel(BuildingID);
             }
+        }
+    }
+}
+
+void FCityGMLImporterModule::CreateOneMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) { 
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+
+    if (World) {
+        // Ein MeshActor pro File
+        AStaticMeshActor* MeshActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform());
+
+        if (MeshActor) {
+            UProceduralMeshComponent* ProceduralMesh = NewObject<UProceduralMeshComponent>(MeshActor);
+            MeshActor->SetRootComponent(ProceduralMesh);
+            ProceduralMesh->RegisterComponent();
+
+            TArray<FVector> AllVertices;
+            TArray<int32> AllTriangles;
+
+            // Offsets für Triangles, pro Gebäude
+            int32 VertexOffset = 0;
+
+            for (int32 i = 0; i < Buildings.Num(); ++i) { // Jedes Gebäude
+                const TArray<TArray<FVector>>& Building = Buildings[i];
+                const TArray<TArray<int32>>& BuildingTriangles = Triangles[i];
+
+                // Für jede Fläche/Wand
+                for (int32 j = 0; j < Building.Num(); ++j) {
+                    const TArray<FVector>& Vertices = Building[j];
+                    const TArray<int32>& TrianglesArray = BuildingTriangles[j];
+
+                    AllVertices.Append(Vertices);
+
+                    for (int32 TriIndex : TrianglesArray) {
+                        AllTriangles.Add(TriIndex + VertexOffset);
+                    }
+
+                    VertexOffset += Vertices.Num();
+                }
+            }
+
+            ProceduralMesh->CreateMeshSection(0, AllVertices, AllTriangles, TArray<FVector>(), TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), true);
+
+            // ID wird noch der Dateiname
+            MeshActor->SetActorLabel(TEXT("BuildingsPerFile"));
         }
     }
 }
