@@ -21,6 +21,9 @@ static const FName CityGMLImporterTabName("CityGMLImporter");
 
 TArray<TArray<TArray<FVector>>> AllBuildings;
 TArray<TArray<TArray<int32>>> AllTriangles;
+TArray<FVector> Normalen;
+float Skalierung = 1.0f; // Normalgroeße bei UE
+
 
 void FCityGMLImporterModule::StartupModule()
 {
@@ -195,14 +198,30 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
                                                 for (int32 i = 0; i < PosArray.Num() - 3; i += 3) { // Alle Punkte außer den letzten weil Kreis
                                                     Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), FCString::Atof(*PosArray[i + 2]), OffsetVector));
                                                 }
-
+                                                
                                                 if (Vertices.Num() >= 3) { // Polygon mit mindestens 3 Punkten, welche nicht konvex und nicht komplex sind (also Lod1)
                                                     for (int32 k = 1; k < Vertices.Num() - 1; ++k) {
                                                         // Füge Dreiecke hinzu
                                                         Triangles.Add(0);
                                                         Triangles.Add(k);
-                                                        Triangles.Add(k + 1);
+                                                        Triangles.Add(k + 1); 
                                                     }
+                                                    // Berechne die Normalen für das Dreieck
+                                                    FVector Vertex1 = Vertices[0];
+                                                    FVector Vertex2 = Vertices[1];
+                                                    FVector Vertex3 = Vertices[2];
+
+                                                    // Berechne die Kantenvektoren
+                                                    FVector Edge1 = Vertex2 - Vertex1;
+                                                    FVector Edge2 = Vertex3 - Vertex1;
+
+                                                    // Berechne die Normale durch Kreuzprodukt
+                                                    FVector FaceNormal = FVector::CrossProduct(Edge1, Edge2).GetSafeNormal();
+
+                                                    for (int32 i2 = 0; i2 < Vertices.Num(); i2++) {
+                                                        Normalen.Add(FaceNormal);
+                                                    }
+
                                                 }
                                             }
                                         }
@@ -279,12 +298,29 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
                                                         Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), FCString::Atof(*PosArray[i + 2]), OffsetVector));
                                                     }
 
+                                                    FVector FaceNormal;
                                                     if (Vertices.Num() >= 3) { // Vermutlich hier erweitert
                                                         for (int32 k = 1; k < Vertices.Num() - 1; ++k) {
                                                             // Füge Dreiecke hinzu
                                                             Triangles.Add(0);
                                                             Triangles.Add(k);
                                                             Triangles.Add(k + 1);
+                                                        }
+
+                                                        // Berechne die Normalen für das Dreieck
+                                                        FVector Vertex1 = Vertices[0];
+                                                        FVector Vertex2 = Vertices[1];
+                                                        FVector Vertex3 = Vertices[2];
+
+                                                        // Berechne die Kantenvektoren
+                                                        FVector Edge1 = Vertex2 - Vertex1;
+                                                        FVector Edge2 = Vertex3 - Vertex1;
+
+                                                        // Berechne die Normale durch Kreuzprodukt
+                                                        FaceNormal = FVector::CrossProduct(Edge1, Edge2).GetSafeNormal();
+
+                                                        for (int32 i2 = 0; i2 < Vertices.Num(); i2++) {
+                                                            Normalen.Add(FaceNormal);
                                                         }
                                                     }
                                                 }
@@ -311,10 +347,11 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
 FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, float UTM_Z, FVector OriginOffset)
 {
     // Vertausche die Achsen: X -> Y und Y -> X ( X Osten/ Y Norden)
-    float UnrealX = UTM_Y - OriginOffset.Y;
-    float UnrealY = UTM_X - OriginOffset.X;
+    // Skalierung 1:100 ohne den Faktor
+    float UnrealX = (UTM_Y - OriginOffset.Y) * Skalierung;
+    float UnrealY = (UTM_X - OriginOffset.X) * Skalierung;
 
-    return FVector(UnrealX, UnrealY, UTM_Z + 200.0f);
+    return FVector(UnrealX, UnrealY, UTM_Z * Skalierung + 200.0f); // + 200 wegen der momentanen Map 
 }
 
 void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) {
@@ -386,281 +423,24 @@ void FCityGMLImporterModule::CreateOneMeshFromPolygon(TArray<TArray<TArray<FVect
                     VertexOffset += Vertices.Num();
                 }
             }
+            
+            UE_LOG(LogTemp, Log, TEXT("Anzahl der Vertices: %d"), AllVerticesMesh.Num());
+            UE_LOG(LogTemp, Log, TEXT("Anzahl der Normalen: %d"), Normalen.Num());
 
-            ProceduralMesh->CreateMeshSection(0, AllVerticesMesh, AllTrianglesMesh, TArray<FVector>(), TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), true);
+            TArray<FVector2D> UVs;
+            for (const FVector& Vertex : AllVerticesMesh)
+            {
+                UVs.Add(FVector2D(Vertex.X, Vertex.Y)); // Simple UV mapping based on X and Y
+            }
+
+
+            ProceduralMesh->CreateMeshSection(0, AllVerticesMesh, AllTrianglesMesh, Normalen, UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), true);
 
             // ID wird noch der Dateiname
             MeshActor->SetActorLabel(TEXT("CityGMLMesh"));
         }
     }
 }
-
-void FCityGMLImporterModule::testGebauedeGenerationUE() { // Generierte Testdaten für 3 Häuser
-    TArray<TArray<TArray<FVector>>> Buildings;
-    TArray<TArray<TArray<int32>>> Triangles;
-    TArray<FString> BuildingIds;
-
-    TArray<TArray<FVector>> Building1Vertices;
-    TArray<TArray<int32>> Building1Triangles;
-
-    // Boden (rechteckige Grundfläche)
-    TArray<FVector> FloorVertices1 = {
-        FVector(0, 0, 200),      // Unten links
-        FVector(100, 0, 200),    // Unten rechts
-        FVector(100, 100, 200),  // Oben rechts
-        FVector(0, 100, 200)     // Oben links
-    };
-    TArray<int32> FloorTriangles1 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 1
-    TArray<FVector> Wall1Vertices1 = {
-        FVector(0, 0, 200),      // Unten links
-        FVector(100, 0, 200),    // Unten rechts
-        FVector(100, 0, 400),    // Oben rechts
-        FVector(0, 0, 400)       // Oben links
-    };
-    TArray<int32> Wall1Triangles1 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 2
-    TArray<FVector> Wall2Vertices1 = {
-        FVector(100, 0, 200),    // Unten links
-        FVector(100, 100, 200),  // Unten rechts
-        FVector(100, 100, 400),  // Oben rechts
-        FVector(100, 0, 400)     // Oben links
-    };
-    TArray<int32> Wall2Triangles1 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 3
-    TArray<FVector> Wall3Vertices1 = {
-        FVector(100, 100, 200),  // Unten links
-        FVector(0, 100, 200),    // Unten rechts
-        FVector(0, 100, 400),    // Oben rechts
-        FVector(100, 100, 400)   // Oben links
-    };
-    TArray<int32> Wall3Triangles1 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 4
-    TArray<FVector> Wall4Vertices1 = {
-        FVector(0, 100, 200),    // Unten links
-        FVector(0, 0, 200),      // Unten rechts
-        FVector(0, 0, 400),      // Oben rechts
-        FVector(0, 100, 400)     // Oben links
-    };
-    TArray<int32> Wall4Triangles1 = { 0, 1, 2, 0, 2, 3 };
-
-    // Dach (rechteckige obere Fläche)
-    TArray<FVector> RoofVertices1 = {
-        FVector(0, 0, 400),      // Unten links
-        FVector(100, 0, 400),    // Unten rechts
-        FVector(100, 100, 400),  // Oben rechts
-        FVector(0, 100, 400)     // Oben links
-    };
-    TArray<int32> RoofTriangles1 = { 0, 1, 2, 0, 2, 3 };
-
-    // Füge Boden, Wände und Dach zum Gebäude hinzu
-    Building1Vertices.Add(FloorVertices1);
-    Building1Triangles.Add(FloorTriangles1);
-
-    Building1Vertices.Add(Wall1Vertices1);
-    Building1Triangles.Add(Wall1Triangles1);
-
-    Building1Vertices.Add(Wall2Vertices1);
-    Building1Triangles.Add(Wall2Triangles1);
-
-    Building1Vertices.Add(Wall3Vertices1);
-    Building1Triangles.Add(Wall3Triangles1);
-
-    Building1Vertices.Add(Wall4Vertices1);
-    Building1Triangles.Add(Wall4Triangles1);
-
-    Building1Vertices.Add(RoofVertices1);
-    Building1Triangles.Add(RoofTriangles1);
-
-    // Gebäude hinzufügen
-    Buildings.Add(Building1Vertices);
-    Triangles.Add(Building1Triangles);
-    BuildingIds.Add(TEXT("Building_1"));
-
-    // Gebäude 2 (ähnliches Gebäude, etwas größer)
-    TArray<TArray<FVector>> Building2Vertices;
-    TArray<TArray<int32>> Building2Triangles;
-
-    // Boden
-    TArray<FVector> FloorVertices2 = {
-        FVector(150, 0, 200),     // Unten links
-        FVector(300, 0, 200),     // Unten rechts
-        FVector(300, 150, 200),   // Oben rechts
-        FVector(150, 150, 200)    // Oben links
-    };
-    TArray<int32> FloorTriangles2 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 1
-    TArray<FVector> Wall1Vertices2 = {
-        FVector(150, 0, 200),     // Unten links
-        FVector(300, 0, 200),     // Unten rechts
-        FVector(300, 0, 500),     // Oben rechts
-        FVector(150, 0, 500)      // Oben links
-    };
-    TArray<int32> Wall1Triangles2 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 2
-    TArray<FVector> Wall2Vertices2 = {
-        FVector(300, 0, 200),     // Unten links
-        FVector(300, 150, 200),   // Unten rechts
-        FVector(300, 150, 500),   // Oben rechts
-        FVector(300, 0, 500)      // Oben links
-    };
-    TArray<int32> Wall2Triangles2 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 3
-    TArray<FVector> Wall3Vertices2 = {
-        FVector(300, 150, 200),   // Unten links
-        FVector(150, 150, 200),   // Unten rechts
-        FVector(150, 150, 500),   // Oben rechts
-        FVector(300, 150, 500)    // Oben links
-    };
-    TArray<int32> Wall3Triangles2 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 4
-    TArray<FVector> Wall4Vertices2 = {
-        FVector(150, 150, 200),   // Unten links
-        FVector(150, 0, 200),     // Unten rechts
-        FVector(150, 0, 500),     // Oben rechts
-        FVector(150, 150, 500)    // Oben links
-    };
-    TArray<int32> Wall4Triangles2 = { 0, 1, 2, 0, 2, 3 };
-
-    // Dach
-    TArray<FVector> RoofVertices2 = {
-        FVector(150, 0, 500),     // Unten links
-        FVector(300, 0, 500),     // Unten rechts
-        FVector(300, 150, 500),   // Oben rechts
-        FVector(150, 150, 500)    // Oben links
-    };
-    TArray<int32> RoofTriangles2 = { 0, 1, 2, 0, 2, 3 };
-
-    // Füge Boden, Wände und Dach zum Gebäude hinzu
-    Building2Vertices.Add(FloorVertices2);
-    Building2Triangles.Add(FloorTriangles2);
-
-    Building2Vertices.Add(Wall1Vertices2);
-    Building2Triangles.Add(Wall1Triangles2);
-
-    Building2Vertices.Add(Wall2Vertices2);
-    Building2Triangles.Add(Wall2Triangles2);
-
-    Building2Vertices.Add(Wall3Vertices2);
-    Building2Triangles.Add(Wall3Triangles2);
-
-    Building2Vertices.Add(Wall4Vertices2);
-    Building2Triangles.Add(Wall4Triangles2);
-
-    Building2Vertices.Add(RoofVertices2);
-    Building2Triangles.Add(RoofTriangles2);
-
-    // Gebäude hinzufügen
-    Buildings.Add(Building2Vertices);
-    Triangles.Add(Building2Triangles);
-    BuildingIds.Add(TEXT("Building_2"));
-
-    // Gebäude 3 (noch größer und komplexer mit 6 Wänden)
-    TArray<TArray<FVector>> Building3Vertices;
-    TArray<TArray<int32>> Building3Triangles;
-
-    // Boden
-    TArray<FVector> FloorVertices3 = {
-        FVector(350, 0, 200),     // Unten links
-        FVector(550, 0, 200),     // Unten rechts
-        FVector(550, 200, 200),   // Oben rechts
-        FVector(350, 200, 200)    // Oben links
-    };
-    TArray<int32> FloorTriangles3 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 1
-    TArray<FVector> Wall1Vertices3 = {
-        FVector(350, 0, 200),     // Unten links
-        FVector(550, 0, 200),     // Unten rechts
-        FVector(550, 0, 600),     // Oben rechts
-        FVector(350, 0, 600)      // Oben links
-    };
-    TArray<int32> Wall1Triangles3 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 2
-    TArray<FVector> Wall2Vertices3 = {
-        FVector(550, 0, 200),     // Unten links
-        FVector(550, 200, 200),   // Unten rechts
-        FVector(550, 200, 600),   // Oben rechts
-        FVector(550, 0, 600)      // Oben links
-    };
-    TArray<int32> Wall2Triangles3 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 3
-    TArray<FVector> Wall3Vertices3 = {
-        FVector(550, 200, 200),   // Unten links
-        FVector(350, 200, 200),   // Unten rechts
-        FVector(350, 200, 600),   // Oben rechts
-        FVector(550, 200, 600)    // Oben links
-    };
-    TArray<int32> Wall3Triangles3 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 4
-    TArray<FVector> Wall4Vertices3 = {
-        FVector(350, 200, 200),   // Unten links
-        FVector(350, 0, 200),     // Unten rechts
-        FVector(350, 0, 600),     // Oben rechts
-        FVector(350, 200, 600)    // Oben links
-    };
-    TArray<int32> Wall4Triangles3 = { 0, 1, 2, 0, 2, 3 };
-
-    // Wand 5 (extrawand zur Variation)
-    TArray<FVector> Wall5Vertices3 = {
-        FVector(350, 100, 200),   // Unten links
-        FVector(550, 100, 200),   // Unten rechts
-        FVector(550, 100, 600),   // Oben rechts
-        FVector(350, 100, 600)    // Oben links
-    };
-    TArray<int32> Wall5Triangles3 = { 0, 1, 2, 0, 2, 3 };
-
-    // Dach
-    TArray<FVector> RoofVertices3 = {
-        FVector(350, 0, 600),     // Unten links
-        FVector(550, 0, 600),     // Unten rechts
-        FVector(550, 200, 600),   // Oben rechts
-        FVector(350, 200, 600)    // Oben links
-    };
-    TArray<int32> RoofTriangles3 = { 0, 1, 2, 0, 2, 3 };
-
-    // Füge Boden, Wände und Dach zum Gebäude hinzu
-    Building3Vertices.Add(FloorVertices3);
-    Building3Triangles.Add(FloorTriangles3);
-
-    Building3Vertices.Add(Wall1Vertices3);
-    Building3Triangles.Add(Wall1Triangles3);
-
-    Building3Vertices.Add(Wall2Vertices3);
-    Building3Triangles.Add(Wall2Triangles3);
-
-    Building3Vertices.Add(Wall3Vertices3);
-    Building3Triangles.Add(Wall3Triangles3);
-
-    Building3Vertices.Add(Wall4Vertices3);
-    Building3Triangles.Add(Wall4Triangles3);
-
-    Building3Vertices.Add(Wall5Vertices3);
-    Building3Triangles.Add(Wall5Triangles3);
-
-    Building3Vertices.Add(RoofVertices3);
-    Building3Triangles.Add(RoofTriangles3);
-
-    // Gebäude hinzufügen
-    Buildings.Add(Building3Vertices);
-    Triangles.Add(Building3Triangles);
-    BuildingIds.Add(TEXT("Building_3"));
-    CreateMeshFromPolygon(Buildings, Triangles, BuildingIds);
-}
-
-
-
 
 #undef LOCTEXT_NAMESPACE
 
