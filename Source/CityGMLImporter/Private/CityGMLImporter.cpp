@@ -22,7 +22,7 @@ static const FName CityGMLImporterTabName("CityGMLImporter");
 TArray<TArray<TArray<FVector>>> AllBuildings;
 TArray<TArray<TArray<int32>>> AllTriangles;
 TArray<FVector> Normalen;
-float Skalierung = 1.0f; // Normalgroeße bei UE
+float Skalierung = 100.0f; // Normalgroeße bei UE
 
 
 void FCityGMLImporterModule::StartupModule()
@@ -193,7 +193,6 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
                                                 FString PosList = PosListNode->GetContent();
                                                 TArray<FString> PosArray;
                                                 PosList.ParseIntoArray(PosArray, TEXT(" "), true);
-                                                UE_LOG(LogTemp, Log, TEXT("Hier PosArray anschauen"))
 
                                                 for (int32 i = 0; i < PosArray.Num() - 3; i += 3) { // Alle Punkte außer den letzten weil Kreis
                                                     Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), FCString::Atof(*PosArray[i + 2]), OffsetVector));
@@ -351,7 +350,7 @@ FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, flo
     float UnrealX = (UTM_Y - OriginOffset.Y) * Skalierung;
     float UnrealY = (UTM_X - OriginOffset.X) * Skalierung;
 
-    return FVector(UnrealX, UnrealY, UTM_Z * Skalierung + 200.0f); // + 200 wegen der momentanen Map 
+    return FVector(UnrealX, UnrealY, UTM_Z * Skalierung );
 }
 
 void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) {
@@ -424,13 +423,13 @@ void FCityGMLImporterModule::CreateOneMeshFromPolygon(TArray<TArray<TArray<FVect
                 }
             }
             
-            UE_LOG(LogTemp, Log, TEXT("Anzahl der Vertices: %d"), AllVerticesMesh.Num());
-            UE_LOG(LogTemp, Log, TEXT("Anzahl der Normalen: %d"), Normalen.Num());
+            //UE_LOG(LogTemp, Log, TEXT("Anzahl der Vertices: %d"), AllVerticesMesh.Num());
+            //UE_LOG(LogTemp, Log, TEXT("Anzahl der Normalen: %d"), Normalen.Num());
 
             TArray<FVector2D> UVs;
             for (const FVector& Vertex : AllVerticesMesh)
             {
-                UVs.Add(FVector2D(Vertex.X, Vertex.Y)); // Simple UV mapping based on X and Y
+                UVs.Add(FVector2D(Vertex.X, Vertex.Y));
             }
 
 
