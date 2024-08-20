@@ -24,6 +24,13 @@ private:
 	void CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds);
 	void CreateOneMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles);
 	void testGebauedeGenerationUE();
+	TArray<FVector> ParsePolygon(const FXmlNode* PolygonNode, FVector OffsetVector);
+	TArray<int32> GenerateTriangles(const TArray<FVector>& Vertices);
+	void GenerateNormals(const TArray<FVector>& v);
+	void GenerateUVs(const TArray<FVector>& v);
+	void GenerateTangents(const TArray<FVector>& v, const TArray<int32> t);
+	//bool IsConvex(const TArray<FVector>& p);
+
 
 
 

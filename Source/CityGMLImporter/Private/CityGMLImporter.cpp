@@ -21,7 +21,12 @@ static const FName CityGMLImporterTabName("CityGMLImporter");
 
 TArray<TArray<TArray<FVector>>> AllBuildings;
 TArray<TArray<TArray<int32>>> AllTriangles;
+int32 VertexOffset = 0;
 TArray<FVector> Normalen;
+TArray<FVector2D> UVs;
+TArray<FProcMeshTangent> Tangents;
+
+
 float Skalierung = 100.0f; // Normalgroeße bei UE
 
 
@@ -51,7 +56,6 @@ void FCityGMLImporterModule::AddMenuExtension(FMenuBuilder& Builder)
     );
 }
 
-
 void FCityGMLImporterModule::PluginButtonClicked()
 {
 
@@ -76,19 +80,23 @@ void FCityGMLImporterModule::PluginButtonClicked()
     {
         AllBuildings.Empty();
         AllTriangles.Empty();
+        Normalen.Empty();
+        UVs.Empty();
+        VertexOffset = 0;
+        Tangents.Empty();
         for (const FString& SelectedFile : OutFiles) {
             ProcessCityGML(SelectedFile);
         }
         CreateOneMeshFromPolygon(AllBuildings, AllTriangles);
         FText DialogText = FText::Format(
-            LOCTEXT("FilesLoaded", "{0} Dateien erfolgreich eingelesen."),
+            LOCTEXT("FilesLoaded", "{0} Files loaded."),
             FText::AsNumber(OutFiles.Num())
             );
         FMessageDialog::Open(EAppMsgType::Ok, DialogText);
     }
     else
     {
-        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("FileNotSelected", "Keine Datei ausgewählt"));
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("FileNotSelected", "No File selceted"));
     }
 }
 
@@ -120,13 +128,17 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
         TArray<FString> OffsetArray;
         lowerCorner.ParseIntoArray(OffsetArray, TEXT(" "), true);
 
-        OffsetVector.X = FCString::Atof(*OffsetArray[0]);
-        OffsetVector.Y = FCString::Atof(*OffsetArray[1]);
+        // Die 3Fache Setzung der Werte ist drin, weil ich das so schneller zeigen kann
+        //OffsetVector.X = FCString::Atof(*OffsetArray[0]);
+        //OffsetVector.Y = FCString::Atof(*OffsetArray[1]);
 
+        // Nördlich der Elbe 
         OffsetVector.X = 548000.0f;
         OffsetVector.Y = 5935000.0f;
 
-        OffsetVector.Z = 0.0f;
+        // Für die HafenCity
+        //OffsetVector.X = 565000.0f;
+        //OffsetVector.Y = 5933000.0f;
     }
 
     const FXmlNode* NameNode = CityObjectMembers[0];
@@ -184,47 +196,14 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
                                 TArray<int32> Triangles;
                                 const FXmlNode* PolygonNode = SurfaceMemberNode->FindChildNode(TEXT("gml:Polygon"));
                                 if (PolygonNode) {
-                                    const FXmlNode* PolygonExteriorNode = PolygonNode->FindChildNode(TEXT("gml:exterior"));
-                                    if (PolygonExteriorNode) {
-                                        const FXmlNode* LinearRingNode = PolygonExteriorNode->FindChildNode(TEXT("gml:LinearRing"));
-                                        if (LinearRingNode) {
-                                            const FXmlNode* PosListNode = LinearRingNode->FindChildNode(TEXT("gml:posList"));
-                                            if (PosListNode) {
-                                                FString PosList = PosListNode->GetContent();
-                                                TArray<FString> PosArray;
-                                                PosList.ParseIntoArray(PosArray, TEXT(" "), true);
-
-                                                for (int32 i = 0; i < PosArray.Num() - 3; i += 3) { // Alle Punkte außer den letzten weil Kreis
-                                                    Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), FCString::Atof(*PosArray[i + 2]), OffsetVector));
-                                                }
-                                                
-                                                if (Vertices.Num() >= 3) { // Polygon mit mindestens 3 Punkten, welche nicht konvex und nicht komplex sind (also Lod1)
-                                                    for (int32 k = 1; k < Vertices.Num() - 1; ++k) {
-                                                        // Füge Dreiecke hinzu
-                                                        Triangles.Add(0);
-                                                        Triangles.Add(k);
-                                                        Triangles.Add(k + 1); 
-                                                    }
-                                                    // Berechne die Normalen für das Dreieck
-                                                    FVector Vertex1 = Vertices[0];
-                                                    FVector Vertex2 = Vertices[1];
-                                                    FVector Vertex3 = Vertices[2];
-
-                                                    // Berechne die Kantenvektoren
-                                                    FVector Edge1 = Vertex2 - Vertex1;
-                                                    FVector Edge2 = Vertex3 - Vertex1;
-
-                                                    // Berechne die Normale durch Kreuzprodukt
-                                                    FVector FaceNormal = FVector::CrossProduct(Edge1, Edge2).GetSafeNormal();
-
-                                                    for (int32 i2 = 0; i2 < Vertices.Num(); i2++) {
-                                                        Normalen.Add(FaceNormal);
-                                                    }
-
-                                                }
-                                            }
-                                        }
+                                    Vertices = ParsePolygon(PolygonNode, OffsetVector);
+                                    if (Vertices.Num() >= 3) {
+                                        Triangles = GenerateTriangles(Vertices);
+                                        GenerateNormals(Vertices);
+                                        GenerateUVs(Vertices);
+                                        GenerateTangents(Vertices, Triangles);
                                     }
+                                    VertexOffset += Vertices.Num();
                                 }
                                 BuildingVectors.Add(Vertices);
                                 BuildingTriangles.Add(Triangles);
@@ -242,8 +221,7 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
     AllBuildings.Append(allBuildingsFromFile);
     AllTriangles.Append(allBuildingsFromFileTriangles);
 }
-
-void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMembers, FVector OffsetVector)
+void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMembers, FVector OffSetVector)
 {
     // Verarbeite die CityObjectMembers für LoD2
     UE_LOG(LogTemp, Log, TEXT("Processing LoD2"));
@@ -263,7 +241,7 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
 
             for (const FXmlNode* BoundedByNode : BuildingNode->GetChildrenNodes()) {
 
-                if (BoundedByNode->GetTag() == "bldg:boundedBy") { 
+                if (BoundedByNode->GetTag() == "bldg:boundedBy") {
                     TArray<FVector> Vertices; // Für eine Fläche
                     TArray<int32> Triangles;
 
@@ -282,49 +260,18 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
                                     const FXmlNode* PolygonNode = SurfaceMemberNode->FindChildNode(TEXT("gml:Polygon"));
                                     if (PolygonNode) {
 
-                                        const FXmlNode* ExteriorNode = PolygonNode->FindChildNode(TEXT("gml:exterior"));
-                                        if (ExteriorNode) {
-
-                                            const FXmlNode* LinearRingNode = ExteriorNode->FindChildNode(TEXT("gml:LinearRing"));
-                                            if (LinearRingNode) {
-                                                const FXmlNode* PosListNode = LinearRingNode->FindChildNode(TEXT("gml:posList"));
-                                                if (PosListNode) {
-                                                    FString PosList = PosListNode->GetContent();
-                                                    TArray<FString> PosArray;
-                                                    PosList.ParseIntoArray(PosArray, TEXT(" "), true);
-
-                                                    for (int32 i = 0; i < PosArray.Num() - 3; i += 3) { // Alle Punkte außer den letzten weil Kreis
-                                                        Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), FCString::Atof(*PosArray[i + 2]), OffsetVector));
-                                                    }
-
-                                                    FVector FaceNormal;
-                                                    if (Vertices.Num() >= 3) { // Vermutlich hier erweitert
-                                                        for (int32 k = 1; k < Vertices.Num() - 1; ++k) {
-                                                            // Füge Dreiecke hinzu
-                                                            Triangles.Add(0);
-                                                            Triangles.Add(k);
-                                                            Triangles.Add(k + 1);
-                                                        }
-
-                                                        // Berechne die Normalen für das Dreieck
-                                                        FVector Vertex1 = Vertices[0];
-                                                        FVector Vertex2 = Vertices[1];
-                                                        FVector Vertex3 = Vertices[2];
-
-                                                        // Berechne die Kantenvektoren
-                                                        FVector Edge1 = Vertex2 - Vertex1;
-                                                        FVector Edge2 = Vertex3 - Vertex1;
-
-                                                        // Berechne die Normale durch Kreuzprodukt
-                                                        FaceNormal = FVector::CrossProduct(Edge1, Edge2).GetSafeNormal();
-
-                                                        for (int32 i2 = 0; i2 < Vertices.Num(); i2++) {
-                                                            Normalen.Add(FaceNormal);
-                                                        }
-                                                    }
-                                                }
-                                            }
+                                        Vertices = ParsePolygon(PolygonNode, OffSetVector);
+                                        if (Vertices.Num() >= 3) {
+                                            Triangles = GenerateTriangles(Vertices);
+                                            GenerateNormals(Vertices);
+                                            GenerateUVs(Vertices);
+                                            GenerateTangents(Vertices, Triangles);
                                         }
+                                       VertexOffset += Vertices.Num();
+                                       //bool isConvex = FCityGMLImporterModule::IsConvex(Vertices);
+                                       //
+                                       //UE_LOG(LogTemp, Log, TEXT("Das das Polygon konvex ist: %s"), isConvex ? TEXT("true") : TEXT("false"));
+
                                     }
                                 }
                             }
@@ -350,7 +297,116 @@ FVector FCityGMLImporterModule::ConvertUtmToUnreal(float UTM_X, float UTM_Y, flo
     float UnrealX = (UTM_Y - OriginOffset.Y) * Skalierung;
     float UnrealY = (UTM_X - OriginOffset.X) * Skalierung;
 
-    return FVector(UnrealX, UnrealY, UTM_Z * Skalierung );
+    return FVector(UnrealX, UnrealY, UTM_Z * Skalierung + 200.0f);
+}
+
+void FCityGMLImporterModule::CreateOneMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles) { 
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+
+    if (World) {
+        // Ein MeshActor pro File
+        AStaticMeshActor* MeshActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform());
+
+        if (MeshActor) {
+            UProceduralMeshComponent* ProceduralMesh = NewObject<UProceduralMeshComponent>(MeshActor);
+            MeshActor->SetRootComponent(ProceduralMesh);
+            ProceduralMesh->RegisterComponent();
+
+            TArray<FVector> AllVerticesMesh;
+            TArray<int32> AllTrianglesMesh;
+
+            // Offsets für Triangles, pro Gebäude
+
+            for (int32 i = 0; i < Buildings.Num(); ++i) { // Jedes Gebäude
+                const TArray<TArray<FVector>>& Building = Buildings[i];
+                const TArray<TArray<int32>>& BuildingTriangles = Triangles[i];
+
+                // Für jede Fläche/Wand
+                for (int32 j = 0; j < Building.Num(); ++j) {
+                    const TArray<FVector>& Vertices = Building[j];
+                    const TArray<int32>& TrianglesArray = BuildingTriangles[j];
+
+                    AllVerticesMesh.Append(Vertices);
+                    AllTrianglesMesh.Append(TrianglesArray);
+
+                }
+            }
+
+            ProceduralMesh->CreateMeshSection(0, AllVerticesMesh, AllTrianglesMesh, Normalen, UVs, TArray<FColor>(), Tangents, true);
+
+            MeshActor->SetActorLabel(TEXT("CityGMLMesh"));
+        }
+    }
+}
+
+TArray<FVector> FCityGMLImporterModule::ParsePolygon(const FXmlNode* PolygonNode, FVector OffsetVector) {
+    TArray<FVector> Vertices;
+    const FXmlNode* PolygonExteriorNode = PolygonNode->FindChildNode(TEXT("gml:exterior"));
+    if (PolygonExteriorNode) {
+        const FXmlNode* LinearRingNode = PolygonExteriorNode->FindChildNode(TEXT("gml:LinearRing"));
+        if (LinearRingNode) {
+            const FXmlNode* PosListNode = LinearRingNode->FindChildNode(TEXT("gml:posList"));
+            if (PosListNode) {
+                FString PosList = PosListNode->GetContent();
+                TArray<FString> PosArray;
+                PosList.ParseIntoArray(PosArray, TEXT(" "), true);
+                for (int32 i = 0; i < PosArray.Num() - 3; i += 3) {
+                    Vertices.Add(ConvertUtmToUnreal(FCString::Atof(*PosArray[i]), FCString::Atof(*PosArray[i + 1]), FCString::Atof(*PosArray[i + 2]), OffsetVector));
+                }
+            }
+        }
+    }
+    return Vertices;
+}
+
+TArray<int32> FCityGMLImporterModule::GenerateTriangles(const TArray<FVector>& Vertices) {
+    TArray<int32> Triangles; // Implementierung des Fan Algorithmus
+    for (int32 k = 1; k < Vertices.Num() - 1; ++k) {
+        Triangles.Add(0 + VertexOffset);
+        Triangles.Add(k + VertexOffset);
+        Triangles.Add(k + 1 + VertexOffset);
+    }
+    return Triangles;
+}
+
+void FCityGMLImporterModule::GenerateNormals(const TArray<FVector>& Vertices) {
+        FVector Vertex1 = Vertices[0];
+        FVector Vertex2 = Vertices[1];
+        FVector Vertex3 = Vertices[2];
+
+        FVector Edge1 = Vertex2 - Vertex1;
+        FVector Edge2 = Vertex3 - Vertex1;
+
+        FVector FaceNormal = FVector::CrossProduct(Edge1, Edge2).GetSafeNormal();
+
+        for (int32 i = 0; i < Vertices.Num(); ++i) {
+            Normalen.Add(FaceNormal);
+        }
+}
+
+void FCityGMLImporterModule::GenerateUVs(const TArray<FVector>& Vertices) {
+    for (int32 i2 = 0; i2 < Vertices.Num(); i2++) {
+
+        FVector Vertex = Vertices[i2];
+        FVector2D UV;
+
+        if (FMath::Abs(Vertex.Z) > FMath::Abs(Vertex.X) && FMath::Abs(Vertex.Z) > FMath::Abs(Vertex.Y)) {
+            // Projekt auf die Z-Ebene
+            UV.X = Vertex.X / Skalierung;
+            UV.Y = Vertex.Y / Skalierung;
+        }
+        else if (FMath::Abs(Vertex.X) > FMath::Abs(Vertex.Y)) {
+            // Projekt auf die X-Ebene
+            UV.X = Vertex.Y / Skalierung;
+            UV.Y = Vertex.Z / Skalierung;
+        }
+        else {
+            // Projekt auf die Y-Ebene
+            UV.X = Vertex.X / Skalierung;
+            UV.Y = Vertex.Z / Skalierung;
+        }
+        UVs.Add(UV);
+    }
 }
 
 void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) {
@@ -386,60 +442,65 @@ void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>
     }
 }
 
-void FCityGMLImporterModule::CreateOneMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles) { 
-    UWorld* World = GEditor->GetEditorWorldContext().World();
+void FCityGMLImporterModule::GenerateTangents(const TArray<FVector>& Vertices, const TArray<int32> Triangles) {
+    FVector Tangent;
+    for (int32 i = 0; i < Triangles.Num(); i += 3) {
+        const FVector& v0 = Vertices[Triangles[i] - VertexOffset];
+        const FVector& v1 = Vertices[Triangles[i + 1] - VertexOffset];
+        const FVector& v2 = Vertices[Triangles[i + 2] - VertexOffset];
 
-    if (World) {
-        // Ein MeshActor pro File
-        AStaticMeshActor* MeshActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform());
+        const FVector2D& uv0 = UVs[Triangles[i] - VertexOffset];
+        const FVector2D& uv1 = UVs[Triangles[i + 1] - VertexOffset];
+        const FVector2D& uv2 = UVs[Triangles[i + 2] - VertexOffset];
 
-        if (MeshActor) {
-            UProceduralMeshComponent* ProceduralMesh = NewObject<UProceduralMeshComponent>(MeshActor);
-            MeshActor->SetRootComponent(ProceduralMesh);
-            ProceduralMesh->RegisterComponent();
+        FVector Edge3 = v1 - v0;
+        FVector Edge4 = v2 - v0;
+        FVector2D UVEdge1 = uv1 - uv0;
+        FVector2D UVEdge2 = uv2 - uv0;
 
-            TArray<FVector> AllVerticesMesh;
-            TArray<int32> AllTrianglesMesh;
+        // Tangent calculation
+        float f = 1.0f / (UVEdge1.X * UVEdge2.Y - UVEdge2.X * UVEdge1.Y);
+        Tangent = f * (Edge3 * UVEdge2.Y - Edge4 * UVEdge1.Y);
+        Tangent.Normalize();
 
-            // Offsets für Triangles, pro Gebäude
-            int32 VertexOffset = 0;
+    }
 
-            for (int32 i = 0; i < Buildings.Num(); ++i) { // Jedes Gebäude
-                const TArray<TArray<FVector>>& Building = Buildings[i];
-                const TArray<TArray<int32>>& BuildingTriangles = Triangles[i];
+    for (int32 i2 = 0; i2 < Vertices.Num(); i2++) {
+        Tangents.Add(FProcMeshTangent(Tangent, true));
 
-                // Für jede Fläche/Wand
-                for (int32 j = 0; j < Building.Num(); ++j) {
-                    const TArray<FVector>& Vertices = Building[j];
-                    const TArray<int32>& TrianglesArray = BuildingTriangles[j];
-
-                    AllVerticesMesh.Append(Vertices);
-
-                    for (int32 TriIndex : TrianglesArray) {
-                        AllTrianglesMesh.Add(TriIndex + VertexOffset);
-                    }
-
-                    VertexOffset += Vertices.Num();
-                }
-            }
-            
-            //UE_LOG(LogTemp, Log, TEXT("Anzahl der Vertices: %d"), AllVerticesMesh.Num());
-            //UE_LOG(LogTemp, Log, TEXT("Anzahl der Normalen: %d"), Normalen.Num());
-
-            TArray<FVector2D> UVs;
-            for (const FVector& Vertex : AllVerticesMesh)
-            {
-                UVs.Add(FVector2D(Vertex.X, Vertex.Y));
-            }
-
-
-            ProceduralMesh->CreateMeshSection(0, AllVerticesMesh, AllTrianglesMesh, Normalen, UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), true);
-
-            // ID wird noch der Dateiname
-            MeshActor->SetActorLabel(TEXT("CityGMLMesh"));
-        }
     }
 }
+
+/*
+bool FCityGMLImporterModule::IsConvex(const TArray<FVector>& Polygon) // Von iwer geklaut
+{
+    // no polygon with less than three vertices
+    if (Polygon.Num() < 3)
+        return false;
+
+    // determine if z-component of cross product of consecutive edges all have the same sign
+    bool bSignPositive = false;
+    for (int i = 0; i < Polygon.Num(); ++i)
+    {
+        const float Dx1 = Polygon[(i + 1) % Polygon.Num()].X - Polygon[i].X;
+        const float Dy1 = Polygon[(i + 1) % Polygon.Num()].Y - Polygon[i].Y;
+        const float Dx2 = Polygon[(i + 2) % Polygon.Num()].X - Polygon[(i + 1) % Polygon.Num()].X;
+        const float Dy2 = Polygon[(i + 2) % Polygon.Num()].Y - Polygon[(i + 1) % Polygon.Num()].Y;
+
+        const float ZCross = Dx1 * Dy2 - Dy1 * Dx2;
+
+        if (i == 0)
+            bSignPositive = ZCross > 0;
+        else if ((ZCross > 0) != bSignPositive)
+        {
+            // at least one corner is not convex
+            return false;
+        }
+    }
+
+    return true;
+} 
+*/
 
 #undef LOCTEXT_NAMESPACE
 
