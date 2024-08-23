@@ -70,7 +70,7 @@ void FCityGMLImporterModule::PluginButtonClicked()
             TEXT("Select CityGML files to import"),
             FPaths::ProjectDir(),
             TEXT(""),
-            TEXT("CityGML Files (*.xml)|*.xml"),
+            TEXT("CityGML Files (*.xml, *.gml)|*.xml;*.gml"),
             EFileDialogFlags::Multiple,
             OutFiles
         );
@@ -90,7 +90,7 @@ void FCityGMLImporterModule::PluginButtonClicked()
         CreateOneMeshFromPolygon(AllBuildings, AllTriangles);
         FText DialogText = FText::Format(
             LOCTEXT("FilesLoaded", "{0} Files loaded."),
-            FText::AsNumber(OutFiles.Num())
+            FText::AsNumber(OutFiles.Num()) // Eig nicht ganz richtig
             );
         FMessageDialog::Open(EAppMsgType::Ok, DialogText);
     }
@@ -112,15 +112,29 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
 
     // Überprüfen, ob es sich um eine CityGML-Datei handelt und Rootnode bekommen
     FXmlNode* RootNode = XmlFile.GetRootNode();
-    if (!RootNode || RootNode->GetTag() != TEXT("core:CityModel"))
-    {
-        UE_LOG(LogTemp, Error, TEXT("The file does not appear to be a valid CityGML file: %s"), *FilePath);
+    int32 BoundedByNumber;
+    FString LoD;
+    if (RootNode) {
+        if (RootNode->GetTag() == TEXT("core:CityModel")) { // LoD 1 oder 2
+            BoundedByNumber = 1;
+        }
+        else if (RootNode->GetTag() == TEXT("CityModel")) { // LoD 3
+            BoundedByNumber = 0;
+            LoD = "LoD3";
+        }
+        else {
+            UE_LOG(LogTemp, Error, TEXT("The File does not appear to be a CityGML File"));
+            return;
+        }
+   
+    } else {
+        UE_LOG(LogTemp, Error, TEXT("The file lacks Content: %s"), *FilePath);
         return;
     }
 
     const TArray<FXmlNode*>& CityObjectMembers = RootNode->GetChildrenNodes();
     FVector OffsetVector = FVector(0.0f, 0.0f, 0.0f);
-    const FXmlNode* BoundaryNode = CityObjectMembers[1]->FindChildNode(TEXT("gml:Envelope"));
+    const FXmlNode* BoundaryNode = CityObjectMembers[BoundedByNumber]->FindChildNode(TEXT("gml:Envelope"));
 
     if (BoundaryNode) {
         // Aus dem Boundary Vektor die x und y Koordinaten extrahieren für einen Offset
@@ -129,30 +143,37 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
         lowerCorner.ParseIntoArray(OffsetArray, TEXT(" "), true);
 
         // Die 3Fache Setzung der Werte ist drin, weil ich das so schneller zeigen kann
-        //OffsetVector.X = FCString::Atof(*OffsetArray[0]);
-        //OffsetVector.Y = FCString::Atof(*OffsetArray[1]);
+        OffsetVector.X = FCString::Atof(*OffsetArray[0]);
+        OffsetVector.Y = FCString::Atof(*OffsetArray[1]);
 
         // Nördlich der Elbe 
-        OffsetVector.X = 548000.0f;
-        OffsetVector.Y = 5935000.0f;
+        //OffsetVector.X = 548000.0f;
+        //OffsetVector.Y = 5935000.0f;
 
         // Für die HafenCity
-        //OffsetVector.X = 565000.0f;
-        //OffsetVector.Y = 5933000.0f;
+        OffsetVector.X = 565000.0f;
+        OffsetVector.Y = 5933000.0f;
     }
 
     const FXmlNode* NameNode = CityObjectMembers[0];
     if (NameNode) {
-        FString LoD = NameNode->GetContent().Left(4);
+        if (LoD.IsEmpty()) {
+            LoD = NameNode->GetContent().Left(4);
+        }
         if (LoD == "LoD1") {
             ProcessLoD1(CityObjectMembers, OffsetVector);
         }
         else if (LoD == "LoD2") {
             ProcessLoD2(CityObjectMembers, OffsetVector);
         }
-        else {
-            UE_LOG(LogTemp, Log, TEXT("LoD nicht unterstuetzt"));
+        else if (LoD == "LoD3") {
+            ProcessLoD3(CityObjectMembers, OffsetVector);
         }
+        else {
+            UE_LOG(LogTemp, Error, TEXT("This Level of Detail is not supported"));
+            return;
+        }
+
     }
 
     UE_LOG(LogTemp, Log, TEXT("Finished processing CityGML file: %s"), *FilePath);
@@ -279,6 +300,72 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
                     }
                     BuildingVectors.Add(Vertices);
                     BuildingTriangles.Add(Triangles);
+                }
+            } // Dach / Bodenflaeche / Wand Ende
+            allBuildingsFromFile.Add(BuildingVectors);
+            allBuildingsFromFileTriangles.Add(BuildingTriangles);
+            BuildingIds.Add(BuildingID);
+        }
+    } // Gebäude Ende Schleife
+    AllBuildings.Append(allBuildingsFromFile);
+    AllTriangles.Append(allBuildingsFromFileTriangles);
+}
+
+void FCityGMLImporterModule::ProcessLoD3(const TArray<FXmlNode*>& CityObjectMembers, FVector OffSetVector)
+{
+    // Verarbeite die CityObjectMembers für LoD3
+    UE_LOG(LogTemp, Log, TEXT("Processing LoD3"));
+
+    TArray<TArray<TArray<FVector>>> allBuildingsFromFile; // Alle Gebäude
+    TArray<TArray<TArray<int32>>> allBuildingsFromFileTriangles;
+    TArray<FString> BuildingIds;
+
+    for (FXmlNode* CityObjectMember : CityObjectMembers) {
+
+        // Suche nach Building-Knoten
+        const FXmlNode* BuildingNode = CityObjectMember->FindChildNode(TEXT("bldg:Building"));
+        if (BuildingNode) {
+            TArray<TArray<FVector>> BuildingVectors; // Ein Gebäude
+            TArray<TArray<int32>> BuildingTriangles;
+            FString BuildingID = BuildingNode->GetAttribute(TEXT("gml:id"));
+
+            for (const FXmlNode* BoundedByNode : BuildingNode->GetChildrenNodes()) {
+
+                if (BoundedByNode->GetTag() == "bldg:boundedBy") {
+
+                    const FXmlNode* SurfaceNode = BoundedByNode->GetFirstChildNode(); // RoofSurface oder WallSurface oder GroundSurface
+                    if (SurfaceNode) {
+
+                        const FXmlNode* Lod3MultiSurfaceNode = SurfaceNode->FindChildNode(TEXT("bldg:lod3MultiSurface"));
+                        if (Lod3MultiSurfaceNode) {
+
+                            const FXmlNode* MultiSurfaceNode = Lod3MultiSurfaceNode->FindChildNode(TEXT("gml:MultiSurface"));
+                            if (MultiSurfaceNode) {
+
+                                const TArray<FXmlNode*>& SurfaceMemberNodes = MultiSurfaceNode->GetChildrenNodes();
+                                for (const FXmlNode* SurfaceMemberNode : SurfaceMemberNodes) {
+                                    TArray<FVector> Vertices; // Für eine Fläche
+                                    TArray<int32> Triangles;
+                                    if (SurfaceMemberNode && SurfaceMemberNode->GetTag() == TEXT("gml:surfaceMember")) {
+                                        const FXmlNode* PolygonNode = SurfaceMemberNode->FindChildNode(TEXT("gml:Polygon"));
+                                        if (PolygonNode) {
+
+                                            Vertices = ParsePolygon(PolygonNode, OffSetVector);
+                                            if (Vertices.Num() >= 3) {
+                                                Triangles = GenerateTriangles(Vertices);
+                                                GenerateNormals(Vertices);
+                                                GenerateUVs(Vertices);
+                                                GenerateTangents(Vertices, Triangles);
+                                            }
+                                            VertexOffset += Vertices.Num();
+                                        }
+                                    }
+                                    BuildingVectors.Add(Vertices);
+                                    BuildingTriangles.Add(Triangles);
+                                }
+                            }
+                        }
+                    }
                 }
             } // Dach / Bodenflaeche / Wand Ende
             allBuildingsFromFile.Add(BuildingVectors);

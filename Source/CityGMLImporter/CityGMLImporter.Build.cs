@@ -33,7 +33,7 @@ public class CityGMLImporter : ModuleRules
                 "XmlParser",
                 "DesktopPlatform",
                 "Projects",
-                "ProceduralMeshComponent",
+                "ProceduralMeshComponent"
                 // ... add other public dependencies that you statically link with here ...
             }
         );

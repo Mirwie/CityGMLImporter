@@ -20,10 +20,10 @@ private:
 	void ProcessCityGML(const FString& FString);
 	void ProcessLoD1(const TArray<FXmlNode*>& CityObjectMembers, FVector Offsetvector);
 	void ProcessLoD2(const TArray<FXmlNode*>& CityObjectMembers, FVector Offsetvector);
+	void ProcessLoD3(const TArray<FXmlNode*>& CityObjectMembers, FVector Offsetvector);
 	FVector ConvertUtmToUnreal(float UTM_X, float UTM_Y, float UTM_Z,  FVector OriginOffset);
 	void CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds);
 	void CreateOneMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles);
-	void testGebauedeGenerationUE();
 	TArray<FVector> ParsePolygon(const FXmlNode* PolygonNode, FVector OffsetVector);
 	TArray<int32> GenerateTriangles(const TArray<FVector>& Vertices);
 	void GenerateNormals(const TArray<FVector>& v);
