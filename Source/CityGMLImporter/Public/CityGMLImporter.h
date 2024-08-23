@@ -29,8 +29,7 @@ private:
 	void GenerateNormals(const TArray<FVector>& v);
 	void GenerateUVs(const TArray<FVector>& v);
 	void GenerateTangents(const TArray<FVector>& v, const TArray<int32> t);
-	//bool IsConvex(const TArray<FVector>& p);
-
+	TArray<FString> GetAdress(const FXmlNode* Node);
 
 
 

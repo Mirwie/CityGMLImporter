@@ -21,6 +21,7 @@ static const FName CityGMLImporterTabName("CityGMLImporter");
 
 TArray<TArray<TArray<FVector>>> AllBuildings;
 TArray<TArray<TArray<int32>>> AllTriangles;
+TArray<TArray<FString>> AllAdresses;
 int32 VertexOffset = 0;
 TArray<FVector> Normalen;
 TArray<FVector2D> UVs;
@@ -189,6 +190,7 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
     TArray<TArray<TArray<FVector>>> allBuildingsFromFile; // Alle Gebäude
     TArray<TArray<TArray<int32>>> allBuildingsFromFileTriangles;
     TArray<FString> BuildingIds;
+    TArray<TArray<FString>> allAddressInfo;
     for (FXmlNode* CityObjectMember : CityObjectMembers)
     {
         // Suche nach Building-Knoten
@@ -198,6 +200,7 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
             TArray<TArray<FVector>> BuildingVectors; // Ein Gebäude
             TArray<TArray<int32>> BuildingTriangles;
             FString BuildingID = BuildingNode->GetAttribute(TEXT("gml:id"));
+            TArray<FString> AddressInfo;
 
             const FXmlNode* Lod1SolidNode = BuildingNode->FindChildNode(TEXT("bldg:lod1Solid"));
             if (Lod1SolidNode) {
@@ -229,18 +232,24 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
                                 BuildingVectors.Add(Vertices);
                                 BuildingTriangles.Add(Triangles);
                             } // Wand bzw. Decke Ende
-
+                            const FXmlNode* AddressNode = BuildingNode->FindChildNode(TEXT("bldg:address"));
+                            if (AddressNode) {
+                                AddressInfo = GetAdress(AddressNode);
+                            }
                         }
                     }
                 }
             }
+
             BuildingIds.Add(BuildingID); // Hier könnte man Daten wie Adresse und Ort mitnehmen
             allBuildingsFromFile.Add(BuildingVectors);
             allBuildingsFromFileTriangles.Add(BuildingTriangles);
+            allAddressInfo.Add(AddressInfo);
         }
     } // Gebäude zuende
     AllBuildings.Append(allBuildingsFromFile);
     AllTriangles.Append(allBuildingsFromFileTriangles);
+    AllAdresses.Append(allAddressInfo);
 }
 void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMembers, FVector OffSetVector)
 {
@@ -250,6 +259,7 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
     TArray<TArray<TArray<FVector>>> allBuildingsFromFile; // Alle Gebäude
     TArray<TArray<TArray<int32>>> allBuildingsFromFileTriangles;
     TArray<FString> BuildingIds;
+    TArray<TArray<FString>> allAddressInfo;
 
     for (FXmlNode* CityObjectMember : CityObjectMembers) {
 
@@ -259,6 +269,7 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
             TArray<TArray<FVector>> BuildingVectors; // Ein Gebäude
             TArray<TArray<int32>> BuildingTriangles;
             FString BuildingID = BuildingNode->GetAttribute(TEXT("gml:id"));
+            TArray<FString> AddressInfo;
 
             for (const FXmlNode* BoundedByNode : BuildingNode->GetChildrenNodes()) {
 
@@ -301,18 +312,23 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
                     BuildingVectors.Add(Vertices);
                     BuildingTriangles.Add(Triangles);
                 }
+                else if (BoundedByNode->GetTag() == TEXT("bldg:address")) {
+                    AddressInfo = GetAdress(BoundedByNode);
+                }
             } // Dach / Bodenflaeche / Wand Ende
             allBuildingsFromFile.Add(BuildingVectors);
             allBuildingsFromFileTriangles.Add(BuildingTriangles);
             BuildingIds.Add(BuildingID);
+            allAddressInfo.Add(AddressInfo);
         }
     } // Gebäude Ende Schleife
     AllBuildings.Append(allBuildingsFromFile);
     AllTriangles.Append(allBuildingsFromFileTriangles);
+    AllAdresses.Append(allAddressInfo);
 }
 
-void FCityGMLImporterModule::ProcessLoD3(const TArray<FXmlNode*>& CityObjectMembers, FVector OffSetVector)
-{
+void FCityGMLImporterModule::ProcessLoD3(const TArray<FXmlNode*>& CityObjectMembers, FVector OffSetVector) {
+    // Für LoD3 gibt es keine Adressinformationen
     // Verarbeite die CityObjectMembers für LoD3
     UE_LOG(LogTemp, Log, TEXT("Processing LoD3"));
 
@@ -331,7 +347,7 @@ void FCityGMLImporterModule::ProcessLoD3(const TArray<FXmlNode*>& CityObjectMemb
 
             for (const FXmlNode* BoundedByNode : BuildingNode->GetChildrenNodes()) {
 
-                if (BoundedByNode->GetTag() == "bldg:boundedBy") {
+                if (BoundedByNode->GetTag() == "bldg:boundedBy") { // Für die Textur koordianten hier auf app:appearence pruefen und ein paar layer darunter auslesen
 
                     const FXmlNode* SurfaceNode = BoundedByNode->GetFirstChildNode(); // RoofSurface oder WallSurface oder GroundSurface
                     if (SurfaceNode) {
@@ -497,7 +513,6 @@ void FCityGMLImporterModule::GenerateUVs(const TArray<FVector>& Vertices) {
 }
 
 void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) {
-    // Wenn nicht jedes Gebäude ein Actor sein soll diese Methode raus
     // Und Vertices und Triangles direkt in ein Array
     UWorld* World = GEditor->GetEditorWorldContext().World();
 
@@ -558,36 +573,50 @@ void FCityGMLImporterModule::GenerateTangents(const TArray<FVector>& Vertices, c
     }
 }
 
-/*
-bool FCityGMLImporterModule::IsConvex(const TArray<FVector>& Polygon) // Von iwer geklaut
-{
-    // no polygon with less than three vertices
-    if (Polygon.Num() < 3)
-        return false;
+TArray<FString> FCityGMLImporterModule::GetAdress(const FXmlNode* node) {
+    TArray<FString> AddressInfo;
 
-    // determine if z-component of cross product of consecutive edges all have the same sign
-    bool bSignPositive = false;
-    for (int i = 0; i < Polygon.Num(); ++i)
-    {
-        const float Dx1 = Polygon[(i + 1) % Polygon.Num()].X - Polygon[i].X;
-        const float Dy1 = Polygon[(i + 1) % Polygon.Num()].Y - Polygon[i].Y;
-        const float Dx2 = Polygon[(i + 2) % Polygon.Num()].X - Polygon[(i + 1) % Polygon.Num()].X;
-        const float Dy2 = Polygon[(i + 2) % Polygon.Num()].Y - Polygon[(i + 1) % Polygon.Num()].Y;
-
-        const float ZCross = Dx1 * Dy2 - Dy1 * Dx2;
-
-        if (i == 0)
-            bSignPositive = ZCross > 0;
-        else if ((ZCross > 0) != bSignPositive)
-        {
-            // at least one corner is not convex
-            return false;
+    const FXmlNode* AdressNode = node->FindChildNode(TEXT("core:Address"));
+    if (AdressNode) {
+        const FXmlNode* XalAdressNode = AdressNode->FindChildNode(TEXT("core:xalAddress"));
+        if (XalAdressNode) {
+            const FXmlNode* AddressDetailsNode = XalAdressNode->FindChildNode(TEXT("xAL:AddressDetails"));
+            if (AddressDetailsNode) {
+                const FXmlNode* CountryNode = AddressDetailsNode->FindChildNode(TEXT("xAL:Country"));
+                if (CountryNode) {
+                    const TArray<FXmlNode*>& CountryNodeChildren = CountryNode->GetChildrenNodes();
+                    for (const FXmlNode* LocalityNode : CountryNodeChildren) {
+                        if (LocalityNode->GetTag() == TEXT("xAL:Locality")) {
+                            const TArray<FXmlNode*>& Children = LocalityNode->GetChildrenNodes();
+                            for (const FXmlNode* AdressAndStreetNode : Children) {
+                                if (AdressAndStreetNode->GetTag() == TEXT("xAL:Thoroughfare")) {
+                                    const FXmlNode* ThoroughfareNodeAndStreet = AdressAndStreetNode->FindChildNode(TEXT("xAL:ThoroughfareName"));
+                                    if (ThoroughfareNodeAndStreet) {
+                                        // Strasse
+                                        AddressInfo.Add(ThoroughfareNodeAndStreet->GetContent());
+                                    }
+                                    const FXmlNode* ThoroughfareNodeAndNumber = AdressAndStreetNode->FindChildNode(TEXT("xAL:ThoroughfareNumber"));
+                                    if (ThoroughfareNodeAndNumber) {
+                                        // Hausnummer 
+                                        AddressInfo.Add(ThoroughfareNodeAndNumber->GetContent());
+                                    }
+                                }
+                                else if (AdressAndStreetNode->GetTag() == TEXT("xAL:PostalCode")) {
+                                    const FXmlNode* PostalCodeNode = AdressAndStreetNode->FindChildNode(TEXT("xAL:PostalCodeNumber"));
+                                    if (PostalCodeNode) {
+                                        // Postleitzahl
+                                        AddressInfo.Add(PostalCodeNode->GetContent());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-
-    return true;
-} 
-*/
+    return AddressInfo;
+}
 
 #undef LOCTEXT_NAMESPACE
 
