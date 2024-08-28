@@ -28,7 +28,8 @@ TArray<FVector2D> UVs;
 TArray<FProcMeshTangent> Tangents;
 
 
-float Skalierung = 100.0f; // Normalgroeße bei UE
+bool OneMesh = true;
+float Skalierung = 1.0f; // 100 Normalgroeße bei UE 
 
 
 void FCityGMLImporterModule::StartupModule()
@@ -66,7 +67,7 @@ void FCityGMLImporterModule::PluginButtonClicked()
 
     if (DesktopPlatform)
     {
-        bOpened = DesktopPlatform->OpenFileDialog(  // Öffne den Datei-Dialog
+        bOpened = DesktopPlatform->OpenFileDialog(
             nullptr,
             TEXT("Select CityGML files to import"),
             FPaths::ProjectDir(),
@@ -88,7 +89,9 @@ void FCityGMLImporterModule::PluginButtonClicked()
         for (const FString& SelectedFile : OutFiles) {
             ProcessCityGML(SelectedFile);
         }
-        CreateOneMeshFromPolygon(AllBuildings, AllTriangles);
+        if(OneMesh) {
+            CreateOneMeshFromPolygon(AllBuildings, AllTriangles);
+        }
         FText DialogText = FText::Format(
             LOCTEXT("FilesLoaded", "{0} Files loaded."),
             FText::AsNumber(OutFiles.Num()) // Eig nicht ganz richtig
@@ -227,7 +230,9 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
                                         GenerateUVs(Vertices);
                                         GenerateTangents(Vertices, Triangles);
                                     }
-                                    VertexOffset += Vertices.Num();
+                                    if (OneMesh) {
+                                        VertexOffset += Vertices.Num();
+                                    }
                                 }
                                 BuildingVectors.Add(Vertices);
                                 BuildingTriangles.Add(Triangles);
@@ -241,13 +246,15 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
                 }
             }
 
-            BuildingIds.Add(BuildingID); // Hier könnte man Daten wie Adresse und Ort mitnehmen
+            BuildingIds.Add(BuildingID);
             allBuildingsFromFile.Add(BuildingVectors);
             allBuildingsFromFileTriangles.Add(BuildingTriangles);
             allAddressInfo.Add(AddressInfo);
         }
     } // Gebäude zuende
-    AllBuildings.Append(allBuildingsFromFile);
+    if (!OneMesh) {
+        CreateMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
+    }    AllBuildings.Append(allBuildingsFromFile);
     AllTriangles.Append(allBuildingsFromFileTriangles);
     AllAdresses.Append(allAddressInfo);
 }
@@ -299,11 +306,9 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
                                             GenerateUVs(Vertices);
                                             GenerateTangents(Vertices, Triangles);
                                         }
-                                       VertexOffset += Vertices.Num();
-                                       //bool isConvex = FCityGMLImporterModule::IsConvex(Vertices);
-                                       //
-                                       //UE_LOG(LogTemp, Log, TEXT("Das das Polygon konvex ist: %s"), isConvex ? TEXT("true") : TEXT("false"));
-
+                                        if (OneMesh) {
+                                            VertexOffset += Vertices.Num();
+                                        }
                                     }
                                 }
                             }
@@ -322,7 +327,9 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
             allAddressInfo.Add(AddressInfo);
         }
     } // Gebäude Ende Schleife
-    AllBuildings.Append(allBuildingsFromFile);
+    if (!OneMesh) {
+        CreateMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
+    }    AllBuildings.Append(allBuildingsFromFile);
     AllTriangles.Append(allBuildingsFromFileTriangles);
     AllAdresses.Append(allAddressInfo);
 }
@@ -373,7 +380,9 @@ void FCityGMLImporterModule::ProcessLoD3(const TArray<FXmlNode*>& CityObjectMemb
                                                 GenerateUVs(Vertices);
                                                 GenerateTangents(Vertices, Triangles);
                                             }
-                                            VertexOffset += Vertices.Num();
+                                            if (OneMesh) {
+                                                VertexOffset += Vertices.Num();
+                                            }
                                         }
                                     }
                                     BuildingVectors.Add(Vertices);
@@ -389,6 +398,9 @@ void FCityGMLImporterModule::ProcessLoD3(const TArray<FXmlNode*>& CityObjectMemb
             BuildingIds.Add(BuildingID);
         }
     } // Gebäude Ende Schleife
+    if (!OneMesh) {
+        CreateMeshFromPolygon(allBuildingsFromFile, allBuildingsFromFileTriangles, BuildingIds);
+    }
     AllBuildings.Append(allBuildingsFromFile);
     AllTriangles.Append(allBuildingsFromFileTriangles);
 }
@@ -463,7 +475,7 @@ TArray<FVector> FCityGMLImporterModule::ParsePolygon(const FXmlNode* PolygonNode
 }
 
 TArray<int32> FCityGMLImporterModule::GenerateTriangles(const TArray<FVector>& Vertices) {
-    TArray<int32> Triangles; // Implementierung des Fan Algorithmus
+    TArray<int32> Triangles; // Implementierung des "Fan"-Algorithmus
     for (int32 k = 1; k < Vertices.Num() - 1; ++k) {
         Triangles.Add(0 + VertexOffset);
         Triangles.Add(k + VertexOffset);
@@ -513,7 +525,6 @@ void FCityGMLImporterModule::GenerateUVs(const TArray<FVector>& Vertices) {
 }
 
 void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>>>& Buildings, TArray<TArray<TArray<int32>>>& Triangles, TArray<FString> BuildingIds) {
-    // Und Vertices und Triangles direkt in ein Array
     UWorld* World = GEditor->GetEditorWorldContext().World();
 
     if (World) {
@@ -536,8 +547,6 @@ void FCityGMLImporterModule::CreateMeshFromPolygon(TArray<TArray<TArray<FVector>
 
                     ProceduralMesh->CreateMeshSection(j, Vertices, TrianglesArray, TArray<FVector>(), TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), true);
                 }
-
-                // Setze einen Label oder eine ID für das Actor-Objekt (optional) und Adresse geht in Lod1 auch
                 MeshActor->SetActorLabel(BuildingID);
             }
         }
