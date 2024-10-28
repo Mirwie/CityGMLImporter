@@ -11,9 +11,11 @@
 #include "XmlParser/Public/XmlFile.h"
 #include "Engine/World.h"
 #include "ProceduralMeshComponent.h"
-#include "KismetProceduralMeshLibrary.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "PolygonHelper.h"
+#include "GeometryData.h"
+#include "GeometryDataHelper.h"
+
 
 static const FName CityGMLImporterTabName("CityGMLImporter");
 
@@ -26,7 +28,8 @@ int32 VertexOffset = 0;
 TArray<FVector> Normalen;
 TArray<FVector2D> UVs;
 TArray<FProcMeshTangent> Tangents;
-
+int32 FilesSuccesful = 0;
+FText Fehlermeldung;
 
 bool OneMesh = true;
 float Skalierung = 1.0f; // 100 Normalgroeße bei UE 
@@ -51,8 +54,8 @@ void FCityGMLImporterModule::ShutdownModule()
 void FCityGMLImporterModule::AddMenuExtension(FMenuBuilder& Builder)
 {
     Builder.AddMenuEntry(
-        LOCTEXT("CityGMLParser", "Select CityGML-File"),
-        LOCTEXT("CityGMLParser_Tooltip", "Select a CityGML file to import"),
+        LOCTEXT("CityGMLParser", "Import CityGML-File"),
+        LOCTEXT("CityGMLParser_Tooltip", "Select CityGML files to import"),
         FSlateIcon(),
         FUIAction(FExecuteAction::CreateRaw(this, &FCityGMLImporterModule::PluginButtonClicked))
     );
@@ -63,11 +66,11 @@ void FCityGMLImporterModule::PluginButtonClicked()
 
     TArray<FString> OutFiles;
     IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-    bool bOpened = false;
+    bool bBOpened = false;
 
     if (DesktopPlatform)
     {
-        bOpened = DesktopPlatform->OpenFileDialog(
+        bBOpened = DesktopPlatform->OpenFileDialog(
             nullptr,
             TEXT("Select CityGML files to import"),
             FPaths::ProjectDir(),
@@ -78,7 +81,7 @@ void FCityGMLImporterModule::PluginButtonClicked()
         );
     }
 
-    if (bOpened && OutFiles.Num() > 0)
+    if (bBOpened && OutFiles.Num() > 0)
     {
         AllBuildings.Empty();
         AllTriangles.Empty();
@@ -86,31 +89,39 @@ void FCityGMLImporterModule::PluginButtonClicked()
         UVs.Empty();
         VertexOffset = 0;
         Tangents.Empty();
+        FilesSuccesful = 0;
         for (const FString& SelectedFile : OutFiles) {
             ProcessCityGML(SelectedFile);
         }
         if(OneMesh) {
             CreateOneMeshFromPolygon(AllBuildings, AllTriangles);
         }
-        FText DialogText = FText::Format(
-            LOCTEXT("FilesLoaded", "{0} Files loaded."),
-            FText::AsNumber(OutFiles.Num()) // Eig nicht ganz richtig
+        if (FilesSuccesful > 0) {
+            FText DialogText = FText::Format(
+                LOCTEXT("FilesLoaded", "{0} Files loaded."),
+                FilesSuccesful
             );
-        FMessageDialog::Open(EAppMsgType::Ok, DialogText);
+            FMessageDialog::Open(EAppMsgType::Ok, DialogText);
+        }
+        else {
+            FMessageDialog::Open(EAppMsgType::Ok, Fehlermeldung);
+        }
+
     }
     else
     {
-        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("FileNotSelected", "No File selceted"));
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("FileNotSelected", "No File selected"));
     }
 }
 
-void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
+void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath) 
 {
     // XML-Datei laden
     FXmlFile XmlFile(FilePath);
     if (!XmlFile.IsValid())
     {
         UE_LOG(LogTemp, Error, TEXT("Failed to load XML file: %s"), *FilePath);
+        Fehlermeldung = FText::Format(LOCTEXT("Loadingfailure", "Failed to load XML file: {0}"), FText::FromString(FilePath));
         return;
     }
 
@@ -127,12 +138,15 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
             LoD = "LoD3";
         }
         else {
-            UE_LOG(LogTemp, Error, TEXT("The File does not appear to be a CityGML File"));
+            UE_LOG(LogTemp, Error, TEXT("The File does not appear to be in CityGML format"));
+            Fehlermeldung = FText::Format(LOCTEXT("NotCityGML", "The File does not appear to be in CityGML format: {0}"), FText::FromString(FilePath));
+
             return;
         }
    
     } else {
         UE_LOG(LogTemp, Error, TEXT("The file lacks Content: %s"), *FilePath);
+        Fehlermeldung = FText::Format(LOCTEXT("NoContent", "The file lacks Content: {0}"), FText::FromString(FilePath));
         return;
     }
 
@@ -147,8 +161,8 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
         lowerCorner.ParseIntoArray(OffsetArray, TEXT(" "), true);
 
         // Die 3Fache Setzung der Werte ist drin, weil ich das so schneller zeigen kann
-        OffsetVector.X = FCString::Atof(*OffsetArray[0]);
-        OffsetVector.Y = FCString::Atof(*OffsetArray[1]);
+        //OffsetVector.X = FCString::Atof(*OffsetArray[0]);
+        //OffsetVector.Y = FCString::Atof(*OffsetArray[1]);
 
         // Nördlich der Elbe 
         //OffsetVector.X = 548000.0f;
@@ -180,12 +194,12 @@ void FCityGMLImporterModule::ProcessCityGML(const FString& FilePath)
 
     }
 
+    FilesSuccesful++;
     UE_LOG(LogTemp, Log, TEXT("Finished processing CityGML file: %s"), *FilePath);
 
 }
 
-void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMembers, FVector OffsetVector)
-{
+void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMembers, FVector OffsetVector) {
     // Verarbeite die CityObjectMembers für LoD1
     UE_LOG(LogTemp, Log, TEXT("Processing LoD1"));
 
@@ -216,7 +230,7 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
 
                         const FXmlNode* CompositeSurfaceNode = ExteriorNode->FindChildNode(TEXT("gml:CompositeSurface"));
                         if (CompositeSurfaceNode) {
-
+                            
                             // Verarbeite alle gml:surfaceMember-Knoten also die einzelnen Waende oder Decken
                             for (const FXmlNode* SurfaceMemberNode : CompositeSurfaceNode->GetChildrenNodes()) {
                                 TArray<FVector> Vertices; // Für eine Fläche
@@ -224,9 +238,18 @@ void FCityGMLImporterModule::ProcessLoD1(const TArray<FXmlNode*>& CityObjectMemb
                                 const FXmlNode* PolygonNode = SurfaceMemberNode->FindChildNode(TEXT("gml:Polygon"));
                                 if (PolygonNode) {
                                     Vertices = ParsePolygon(PolygonNode, OffsetVector);
-                                    if (Vertices.Num() >= 3) {
-                                        Triangles = GenerateTriangles(Vertices);
-                                        GenerateNormals(Vertices);
+                                    TArray<FVector> v;
+                                    if (Vertices.Num() >= 3) { 
+                                        FGeometryData data = GeometryDataHelper::MakeFace(Vertices, false);
+
+                                        Triangles = data.Indices;
+                                        for (int i = 0; i < Triangles.Num(); ++i) {
+                                            Triangles[i] = Triangles[i] + VertexOffset;
+                                        }
+
+                                        //Triangles = GenerateTriangles(Vertices);
+                                        //GenerateNormals(Vertices);
+                                        Normalen.Append(data.Normals);
                                         GenerateUVs(Vertices);
                                         GenerateTangents(Vertices, Triangles);
                                     }
@@ -301,8 +324,17 @@ void FCityGMLImporterModule::ProcessLoD2(const TArray<FXmlNode*>& CityObjectMemb
 
                                         Vertices = ParsePolygon(PolygonNode, OffSetVector);
                                         if (Vertices.Num() >= 3) {
-                                            Triangles = GenerateTriangles(Vertices);
-                                            GenerateNormals(Vertices);
+                                            
+                                            FGeometryData data = GeometryDataHelper::MakeFace(Vertices, false);
+
+                                            Triangles = data.Indices;
+                                            for (int i = 0; i < Triangles.Num(); ++i) {
+                                                Triangles[i] = Triangles[i] + VertexOffset;
+                                            }
+
+                                            //Triangles = GenerateTriangles(Vertices);
+                                            //GenerateNormals(Vertices);
+                                            Normalen.Append(data.Normals);
                                             GenerateUVs(Vertices);
                                             GenerateTangents(Vertices, Triangles);
                                         }
@@ -375,8 +407,16 @@ void FCityGMLImporterModule::ProcessLoD3(const TArray<FXmlNode*>& CityObjectMemb
 
                                             Vertices = ParsePolygon(PolygonNode, OffSetVector);
                                             if (Vertices.Num() >= 3) {
-                                                Triangles = GenerateTriangles(Vertices);
-                                                GenerateNormals(Vertices);
+                                                FGeometryData data = GeometryDataHelper::MakeFace(Vertices, false);
+
+                                                Triangles = data.Indices;
+                                                for (int i = 0; i < Triangles.Num(); ++i) {
+                                                    Triangles[i] = Triangles[i] + VertexOffset;
+                                                }
+
+                                                //Triangles = GenerateTriangles(Vertices);
+                                                //GenerateNormals(Vertices);
+                                                Normalen.Append(data.Normals);
                                                 GenerateUVs(Vertices);
                                                 GenerateTangents(Vertices, Triangles);
                                             }
