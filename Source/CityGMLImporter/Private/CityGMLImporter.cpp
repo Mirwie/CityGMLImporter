@@ -36,9 +36,7 @@ float Skalierung = 1.0f; // 100 Normalgroeße bei UE
 
 
 void FCityGMLImporterModule::StartupModule()
-{
-    // Dieser Code wird nach dem Laden des Moduls ausgeführt
-    FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>("LevelEditor");
+{    FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>("LevelEditor");
 
     TSharedPtr<FExtender> MenuExtender = MakeShareable(new FExtender());
     MenuExtender->AddMenuExtension("FileProject", EExtensionHook::After, nullptr, FMenuExtensionDelegate::CreateRaw(this, &FCityGMLImporterModule::AddMenuExtension));
@@ -47,9 +45,7 @@ void FCityGMLImporterModule::StartupModule()
 }
 
 void FCityGMLImporterModule::ShutdownModule()
-{
-    // Diese Funktion kann beim Herunterfahren aufgerufen werden, um das Modul aufzuräumen
-}
+{}
 
 void FCityGMLImporterModule::AddMenuExtension(FMenuBuilder& Builder)
 {
